@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xmlns="http://maven.apache.org/POM/4.0.0"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>com.tarzan</groupId>
+        <artifactId>maxkb4j-service-api</artifactId>
+        <version>${revision}</version>
+    </parent>
+
+    <artifactId>maxkb4j-model-api</artifactId>
+    <name>${project.artifactId}</name>
+    <packaging>jar</packaging>
+
+    <dependencies>
+        <!-- IModelProviderService 等接口签名依赖 langchain4j 模型类型 -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-core</artifactId>
+        </dependency>
+        <!-- BaseField 表单字段使用 StringUtils -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+        </dependency>
+    </dependencies>
+
+</project>
