@@ -1,0 +1,58 @@
+package com.maxkb4j.trigger.controller;
+
+import com.alibaba.fastjson.JSONObject;
+import com.maxkb4j.trigger.model.TriggerSetting;
+import com.maxkb4j.common.api.R;
+import com.maxkb4j.common.constant.AppConst;
+import com.maxkb4j.common.util.I18nUtil;
+import com.maxkb4j.common.util.WebUtil;
+import com.maxkb4j.trigger.entity.EventTriggerEntity;
+import com.maxkb4j.trigger.enums.TriggerType;
+import com.maxkb4j.trigger.service.IEventTriggerService;
+import com.maxkb4j.trigger.service.TriggerTaskExecutor;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.Objects;
+
+/**
+ * 触发器管理控制器
+ *
+ * @author tarzan
+ * @date 2025-03-15 22:00:45
+ */
+@RestController
+@RequestMapping(AppConst.ADMIN_API)
+@RequiredArgsConstructor
+@Slf4j
+public class WebhookTriggerController {
+
+    private final IEventTriggerService eventTriggerService;
+    private final TriggerTaskExecutor triggerTaskExecutor;
+
+    @PostMapping("/trigger/v1/webhook/{id}")
+    public R<Boolean> webhook(@PathVariable String id, @RequestBody JSONObject data) {
+        EventTriggerEntity eventTrigger = eventTriggerService.getById(id);
+        if (eventTrigger == null) {
+            return R.fail(I18nUtil.get("trigger.event.not.found"));
+        }
+        if (!TriggerType.EVENT.name().equals(eventTrigger.getTriggerType())) {
+            return R.fail(I18nUtil.get("trigger.event.type.invalid"));
+        }
+        if (!eventTrigger.getIsActive()) {
+            return R.fail(I18nUtil.get("trigger.event.disabled"));
+        }
+        TriggerSetting setting = TriggerSetting.from(eventTrigger.getTriggerSetting());
+        if (Objects.nonNull(setting) && Objects.nonNull(setting.token())) {
+            String tokenValue = WebUtil.getTokenValue();
+            if (Objects.equals(tokenValue, setting.token())) {
+                triggerTaskExecutor.execute(id, data);
+                return R.data(true);
+            }
+        }
+        return R.fail(I18nUtil.get("trigger.token.auth.failed"));
+    }
+
+
+}

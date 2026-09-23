@@ -1,0 +1,230 @@
+package com.maxkb4j.tool.service.impl;
+
+import com.alibaba.fastjson.JSONObject;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.maxkb4j.common.constant.ResourceType;
+import com.maxkb4j.common.exception.ApiException;
+import com.maxkb4j.common.util.BeanUtil;
+import com.maxkb4j.core.support.permission.DataPermissionSupport;
+import com.maxkb4j.system.constant.AuthTargetType;
+import com.maxkb4j.system.service.IResourceMappingService;
+import com.maxkb4j.tool.consts.ToolConstants;
+import com.maxkb4j.tool.dto.ToolDTO;
+import com.maxkb4j.tool.dto.ToolQuery;
+import com.maxkb4j.tool.entity.ToolEntity;
+import com.maxkb4j.tool.handler.*;
+import com.maxkb4j.tool.mapper.ToolMapper;
+import com.maxkb4j.tool.service.IToolInternalService;
+import com.maxkb4j.tool.util.McpToolUtil;
+import com.maxkb4j.tool.vo.*;
+import com.maxkb4j.user.service.IUserResourcePermissionService;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 工具服务：仅负责编排，具体职责委托给各 Handler。
+ *
+ * @author tarzan
+ * @date 2025-01-25 22:00:45
+ */
+@Slf4j
+@Service
+@RequiredArgsConstructor
+public class ToolServiceImpl extends ServiceImpl<ToolMapper, ToolEntity> implements IToolInternalService {
+
+    private final IUserResourcePermissionService userResourcePermissionService;
+    private final ToolValidationHandler validationHandler;
+    private final ToolImportExportHandler importExportHandler;
+    private final ToolConnectionHandler connectionHandler;
+    private final ToolPermissionHandler permissionHandler;
+    private final ToolSkillHandler skillHandler;
+    private final ToolAssembleHandler assembleHandler;
+    private final IResourceMappingService resourceMappingService;
+    private final DataPermissionSupport dataPermissionSupport;
+
+    public IPage<ToolCardVO> pageList(int current, int size, ToolQuery query) {
+        IPage<ToolEntity> page = new Page<>(current, size);
+        dataPermissionSupport.fill(query, AuthTargetType.TOOL);
+        return baseMapper.pageList(page, query);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public boolean saveTool(ToolEntity entity) {
+        this.save(entity);
+        skillHandler.onCreate(entity);
+        return userResourcePermissionService.ownerSave(AuthTargetType.TOOL, entity.getId(), entity.getUserId());
+    }
+
+    public boolean mcpServerConfigValid(ToolEntity entity) {
+        return validationHandler.validateMcpServerConfig(entity);
+    }
+
+    public void toolExport(String id, HttpServletResponse response) {
+        ToolEntity entity = this.getById(id);
+        if (entity == null) {
+            throw new ApiException("tool.not.found");
+        }
+        importExportHandler.exportTool(entity, response);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public boolean toolImport(MultipartFile file, String folderId) {
+        ToolEntity tool = importExportHandler.importTool(file, folderId);
+        return this.saveTool(tool);
+    }
+
+    public boolean testConnection(String code) {
+        try {
+            return connectionHandler.testConnection(code);
+        } catch (Exception e) {
+            log.error("连接测试失败", e);
+            return false;
+        }
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public boolean removeToolById(String id) {
+        ToolEntity entity = this.getById(id);
+        if (entity == null) {
+            throw new ApiException("tool.not.found");
+        }
+        skillHandler.onDelete(entity);
+        resourceMappingService.deleteBySourceId(ResourceType.TOOL, id);
+        userResourcePermissionService.remove(AuthTargetType.TOOL, id);
+        return this.removeById(id);
+    }
+
+    /**
+     * 完整字段版本：供需要 code / initParams / inputFieldList 等执行所需信息的场景使用。
+     */
+    public List<ToolItemVO> listTools(String folderId, String scope, String[] toolTypeList) {
+        ToolQuery query = new ToolQuery();
+        query.setFolderId(folderId);
+        query.setScope(scope);
+        query.setIsActive(ToolConstants.Status.ACTIVE);
+        if (toolTypeList != null && toolTypeList.length > 0) {
+            query.setToolTypeList(Arrays.asList(toolTypeList));
+        }
+        dataPermissionSupport.fill(query, AuthTargetType.TOOL);
+        return baseMapper.listTools(query);
+    }
+
+    /**
+     * 轻量字段版本：供前端列表展示使用。
+     */
+    public List<ToolListVO> toolList(String scope, String toolType) {
+        LambdaQueryWrapper<ToolEntity> wrapper = buildListWrapper(scope)
+                .eq(StringUtils.isNotBlank(toolType), ToolEntity::getToolType, toolType)
+                .select(
+                        ToolEntity::getId,
+                        ToolEntity::getName,
+                        ToolEntity::getIcon,
+                        ToolEntity::getToolType,
+                        ToolEntity::getIsActive
+                );
+        return BeanUtil.copyList(this.list(wrapper), ToolListVO.class);
+    }
+
+    /**
+     * 更新工具：处理 Skill 文件替换后入库，并返回组装好的 VO。
+     */
+    public ToolVO updateTool(ToolEntity dto) {
+        ToolEntity oldTool = this.getById(dto.getId());
+        if (oldTool == null) {
+            return null;
+        }
+        skillHandler.onUpdate(oldTool, dto);
+        this.updateById(dto);
+        return assembleHandler.assemble(this.getById(dto.getId()));
+    }
+
+    /**
+     * 获取工具详情。
+     */
+    public ToolVO getVoById(String id) {
+        return assembleHandler.assemble(this.getById(id));
+    }
+
+    public SkillFileVO uploadSkillFile(MultipartFile file) throws IOException {
+        return skillHandler.uploadSkillFile(file);
+    }
+
+    @Override
+    public ToolDTO getDtoById(String id) {
+        return BeanUtil.copy(this.getById(id), ToolDTO.class);
+    }
+
+    @Override
+    public List<ToolDTO> listDtoByIds(List<String> ids) {
+        return BeanUtil.copyList(this.listByIds(ids), ToolDTO.class);
+    }
+
+    @Override
+    public List<Map<String, Object>> listMapsByIds(List<String> ids) {
+        return this.listMaps(new LambdaQueryWrapper<ToolEntity>().in(ToolEntity::getId, ids));
+    }
+
+    @Override
+    public void embedSkillFileContents(List<ToolDTO> toolList) {
+        importExportHandler.embedSkillFileContents(toolList);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void saveOrUpdateBatch(List<ToolDTO> toolDTOList, String userId) {
+        // .mk 导入的 SKILL 工具 code 为文件字节的 Base64 编码，先还原为 OSS 文件 ID
+        importExportHandler.restoreSkillFiles(toolDTOList);
+        List<ToolEntity> toolEntities = BeanUtil.copyList(toolDTOList, ToolEntity.class);
+        // 工具可能来自 .mk 模板，DTO 携带的是模板作者的 userId，需重置为当前导入用户，
+        // 否则 tool.user_id 指向不存在的用户，违反 tool_user_id_fk_user_id 外键约束。
+        toolEntities.forEach(e -> {
+            e.setUserId(userId);
+            e.setIsActive(ToolConstants.Status.ACTIVE);
+        });
+        this.saveOrUpdateBatch(toolEntities);
+        List<String> toolIds = toolEntities.stream().map(ToolEntity::getId).toList();
+        userResourcePermissionService.remove(AuthTargetType.TOOL, toolIds);
+        userResourcePermissionService.ownerSave(AuthTargetType.TOOL, toolIds, userId);
+    }
+
+    @Override
+    public List<McpToolVO> getMcpToolVos(JSONObject mcpServersJson) {
+        return McpToolUtil.getToolVos(mcpServersJson);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public Boolean delMulApplication(List<String> idList) {
+        dataPermissionSupport.checkManagePermission(AuthTargetType.TOOL, idList);
+        boolean result = true;
+        for (String id : idList) {
+            result = removeToolById(id) && result;
+        }
+        return result;
+    }
+
+    /**
+     * 构造列表查询通用条件（含权限过滤与排序，select 字段由上层指定）。
+     */
+    private LambdaQueryWrapper<ToolEntity> buildListWrapper(String scope) {
+        LambdaQueryWrapper<ToolEntity> wrapper = Wrappers.lambdaQuery();
+        wrapper.eq(ToolEntity::getIsActive, ToolConstants.Status.ACTIVE);
+        wrapper.eq(ToolEntity::getScope, scope);
+        wrapper.orderByDesc(ToolEntity::getCreateTime);
+        permissionHandler.applyRoleFilter(wrapper);
+        return wrapper;
+    }
+}

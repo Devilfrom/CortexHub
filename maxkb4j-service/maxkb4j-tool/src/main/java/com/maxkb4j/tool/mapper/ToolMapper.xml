@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.maxkb4j.tool.mapper.ToolMapper">
+
+    <resultMap id="toolCardVoResultMap" type="com.maxkb4j.tool.vo.ToolCardVO">
+        <result property="initFieldList" column="init_field_list"
+                typeHandler="com.maxkb4j.common.typehandler.JSONBTypeHandler"/>
+    </resultMap>
+
+    <select id="pageList" resultMap="toolCardVoResultMap">
+        SELECT
+        t.ID,
+        t.name,
+        t.desc,
+        t.icon,
+        t.tool_type,
+        t.init_field_list,
+        u.nickname,
+        t.is_active,
+        t.template_id,
+        t.version,
+        t.create_time,
+        COALESCE(
+        (
+        SELECT COUNT(*)
+        FROM resource_mapping rm
+        WHERE rm.target_id = t.ID
+        AND rm.target_type = 'TOOL'
+        ),
+        0
+        ) AS resource_count
+        FROM tool t
+        LEFT JOIN "user" u ON t.user_id = u.id
+        <where>
+            <if test="query.createUser != null and query.createUser != ''">
+                AND t.user_id = #{query.createUser}
+            </if>
+            <if test="query.name != null and query.name!= ''">
+                AND t.name LIKE '%' || #{query.name} || '%'
+            </if>
+            <if test="query.folderId != null and query.folderId!= ''">
+                AND t.folder_id = #{query.folderId}
+            </if>
+            <if test="query.toolType != null and query.toolType!= ''">
+                AND t.tool_type = #{query.toolType}
+            </if>
+            <if test="query.isActive != null">
+                AND t.is_active = #{query.isActive}
+            </if>
+            <choose>
+                <when test="query.isAdmin != null and !query.isAdmin">
+                    <choose>
+                        <when test="query.targetIds != null and !query.targetIds.isEmpty()">
+                            AND t.ID IN
+                            <foreach collection="query.targetIds" item="targetId" open="(" separator="," close=")">
+                                #{targetId}
+                            </foreach>
+                        </when>
+                        <otherwise>
+                            AND t.ID=''
+                        </otherwise>
+                    </choose>
+                </when>
+            </choose>
+        </where>
+        ORDER BY t.create_time DESC
+    </select>
+
+
+    <resultMap id="toolItemVoResultMap" type="com.maxkb4j.tool.vo.ToolItemVO">
+        <result property="inputFieldList" column="input_field_list"
+                typeHandler="com.maxkb4j.tool.typehandler.ToolInputParamsTypeHandler"/>
+        <result property="initParams" column="init_params"
+                typeHandler="com.maxkb4j.common.typehandler.JSONBTypeHandler"/>
+    </resultMap>
+
+    <select id="listTools" resultMap="toolItemVoResultMap">
+        SELECT
+        t.id,
+        t.name,
+        t."desc",
+        t.icon,
+        t.code,
+        t.tool_type,
+        t.input_field_list,
+        t.init_params,
+        t.is_active,
+        t.create_time,
+        u.nickname
+        FROM tool t
+        LEFT JOIN "user" u ON t.user_id = u.id
+        <where>
+            AND t.is_active = #{query.isActive}
+            AND t.scope = #{query.scope}
+            <if test="query.folderId != null and query.folderId != ''">
+                AND t.folder_id = #{query.folderId}
+            </if>
+            <if test="query.toolTypeList != null and !query.toolTypeList.isEmpty()">
+                AND t.tool_type IN
+                <foreach collection="query.toolTypeList" item="toolType" open="(" separator="," close=")">
+                    #{toolType}
+                </foreach>
+            </if>
+            <choose>
+                <when test="query.isAdmin != null and !query.isAdmin">
+                    <choose>
+                        <when test="query.targetIds != null and !query.targetIds.isEmpty()">
+                            AND t.id IN
+                            <foreach collection="query.targetIds" item="targetId" open="(" separator="," close=")">
+                                #{targetId}
+                            </foreach>
+                        </when>
+                        <otherwise>
+                            AND t.id = ''
+                        </otherwise>
+                    </choose>
+                </when>
+            </choose>
+        </where>
+        ORDER BY t.create_time DESC
+    </select>
+</mapper>
