@@ -1,0 +1,163 @@
+common:
+  success: 操作成功
+  fail: 操作失败
+  "no":
+    data: 暂无承载数据
+  pk:
+    empty: 主键不能为空
+  record:
+    not:
+      exists: 记录不存在
+  system:
+    error: 系统异常
+  illegal:
+    argument: 非法参数
+  file:
+    limit:
+      exceeded: 文件数量超出限制
+      type:
+        not:
+          allowed: 不支持的文件类型
+      size:
+        exceeded: 文件大小超出限制（最大 {0} MB）
+    empty: 文件内容为空
+  request:
+    context:
+      missing: 无法获取请求上下文
+
+login:
+  password:
+    decrypt:
+      error: 密码解密错误
+  captcha:
+    expired: 验证码已过期
+    error: 验证码错误
+  user:
+    not:
+      exists: 用户名或密码错误
+      found: 用户不存在
+    disabled: 该用户已被禁用，请联系管理员！
+  not:
+    login: 未登录
+  too:
+    many:
+      attempts: 登录失败次数过多，请15分钟后再试
+  "no":
+    permission: 无此权限
+  access:
+    denied: 禁止访问
+
+resource:
+  "no":
+    permission: 无权限删除该资源
+
+user:
+  username:
+    exists: 用户名已存在
+  email:
+    exists: 邮箱已存在
+  password:
+    empty: 密码不能为空
+    not:
+      match: 密码输入不一致
+
+email:
+  subject:
+    forget:
+      password: 【智能知识库问答系统-忘记密码】
+    modify:
+      password: 【智能知识库问答系统-修改密码】
+  test:
+    connect:
+      failed: 测试连接失败
+
+application:
+  token:
+    invalid:
+      or:
+        disabled: token无效或未被启用
+  access:
+    white:
+      list:
+        required: 非法访问，请联系管理员添加白名单
+  not:
+    published: 应用未发布，请发布后使用。
+    found: 未找到应用
+  app:
+    not:
+      found: 未找到应用
+    type:
+      not:
+        found: 未找到应用类型
+  file:
+    format:
+      error: 文件格式错误
+
+model:
+  name:
+    exists: 模型名称已存在
+    not:
+      found: 未找到模型
+  params:
+    invalid: 模型参数无效，请检查模型配置
+
+chat:
+  token:
+    invalid:
+      or:
+        disabled: token不合法或被禁用
+
+tool:
+  not:
+    found: 未找到工具
+  config:
+    invalid: 请检查配置信息
+  groovy:
+    script:
+      execution:
+        timeout: 脚本执行超时（超过 {0} 秒），已强制终止
+        failed: 脚本执行失败：{0}
+        interrupted: 脚本执行被中断
+      dangerous:
+        call: 脚本包含不允许的危险调用：{0}
+  skill:
+    directory:
+      create:
+        failed: 创建技能目录失败：{0}
+    zip:
+      entry:
+        outside:
+          target: Zip条目位于目标目录之外：{0}
+      extract:
+        failed: 技能压缩包解压失败
+    file:
+      extract:
+        failed: 技能文件解压失败
+      format:
+        invalid: 请上传有效的 zip 压缩包文件
+      missing:
+        skill:
+          md: 压缩包中缺少 SKILL.md 文件
+
+trigger:
+  schedule:
+    type:
+      required: 请选择触发周期
+  event:
+    not:
+      found: 事件触发器不存在
+    type:
+      invalid: 触发器不是webhook类型
+    disabled: 事件触发器已禁用
+  token:
+    auth:
+      failed: token鉴权失败
+workflow:
+  condition:
+    "no":
+      match: 条件节点未匹配到任何分支
+
+knowledge:
+  split:
+    pattern:
+      invalid: 分段正则表达式无效：{0}

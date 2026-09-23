@@ -1,0 +1,107 @@
+server:
+  port: 8080
+  error:
+    whitelabel:
+      enabled: true
+  undertow:
+    # 与 multipart 上限保持一致，防止超大请求体耗尽内存
+    max-http-post-size: 300MB
+spring:
+  threads:
+    virtual:
+      enabled: true
+  output:
+    ansi:
+      enabled: ALWAYS
+  application:
+    name: MaxKB4j
+  servlet:
+    multipart:
+      # 单文件上限（文档导入等大文件场景）；超限由框架直接拒绝，避免 OOM
+      max-file-size: 100MB
+      # 单次请求总量上限（多文件批量上传）
+      max-request-size: 300MB
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+  messages:
+    basename: i18n/messages
+    encoding: UTF-8
+    fallback-to-system-locale: false
+    cache-duration: -1
+  cache:
+    type: caffeine
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+    validate-on-migrate: false
+    locations: classpath:db/migration
+  data:
+    mongodb:
+      auto-index-creation: true
+
+
+mybatis-plus:
+  global-config:
+    db-config:
+      capital-mode: false
+      table-format: "\"%s\""
+      column-format: "\"%s\""
+  mapper-locations: classpath:mapper/**/*.xml,mapper/*.xml
+  type-aliases-package: com.maxkb4j.**.entity
+  type-handlers-package: com.maxkb4j.common.typehandler,com.maxkb4j.application.typehandler,com.maxkb4j.model.typehandler,com.maxkb4j.tool.typehandler
+############## Sa-Token 配置 (文档: https://sa-token.cc) ##############
+sa-token:
+  # jwt秘钥 - 必须由环境变量提供，未配置时启动直接失败（见 SaTokenSecretValidator）
+  jwt-secret-key: ${SA_TOKEN_JWT_SECRET_KEY:asdasdasifhueuiwyurfewbfjsdafjk}
+  # token 名称（同时也是 cookie 名称）
+  token-name: token
+  # token 有效期（单位：秒） 默认1天，-1 代表永久有效
+  timeout: 86400
+  # token 最低活跃频率（单位：秒），如果 token 超过此时间没有访问系统就会被冻结，默认-1 代表不限制，永不冻结
+  active-timeout: -1
+  # 是否允许同一账号多地同时登录 （为 true 时允许一起登录, 为 false 时新登录挤掉旧登录）
+  is-concurrent: true
+  # 在多人登录同一账号时，是否共用一个 token （为 true 时所有登录共用一个 token, 为 false 时每次登录新建一个 token）
+  is-share: true
+  # token 风格（默认可取值：uuid、simple-uuid、random-32、random-64、random-128、tik）
+  # token-style: random-128
+  # 是否输出操作日志
+  is-log: true
+
+
+decorator:
+  datasource:
+    p6spy:
+      # 日志格式
+      log-format: "\ntime:%(executionTime) || sql:%(sql)\n"
+      enable-logging: false
+
+system:
+  default-username: admin
+  # 默认管理员口令：未配置时首次启动自动生成随机口令并打印到日志（见 UserServiceImpl.createDefaultAdminUser）
+  default-password: ${SYSTEM_DEFAULT_PASSWORD:tarzan@123456}
+  default-phone: 18838812345
+  default-email: 1334512682@qq.com
+
+
+
+# Docling 文档解析引擎
+doc-ling:
+  enabled: ${MINERU_ENABLED:false}
+  # 自建 Docling 服务地址（self-hosted 模式）
+  base-url: http://localhost:5001
+  # API Key（precision 模式必填）
+  api-key:
+  enable-ocr: true
+  enable-table: true
+  enable-code: false
+  enable-formula: false
+  timeout: 600
+  supported-extensions:
+    - .pdf
+    - .docx
+    - .pptx
+    - .csv
+    - .xlsx
+    - .HTML

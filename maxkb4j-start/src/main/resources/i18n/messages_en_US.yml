@@ -1,0 +1,163 @@
+common:
+  success: Operation successful
+  fail: Operation failed
+  "no":
+    data: No data available
+  pk:
+    empty: Primary key cannot be empty
+  record:
+    not:
+      exists: Record does not exist
+  system:
+    error: System error
+  illegal:
+    argument: Illegal argument
+  file:
+    limit:
+      exceeded: File count exceeds the limit
+      type:
+        not:
+          allowed: File type is not allowed
+      size:
+        exceeded: File size exceeds the limit (max {0} MB)
+    empty: File is empty
+  request:
+    context:
+      missing: Request context is not available
+
+login:
+  password:
+    decrypt:
+      error: Password decryption error
+  captcha:
+    expired: Captcha has expired
+    error: Captcha is incorrect
+  user:
+    not:
+      exists: Username or password is incorrect
+      found: User does not exist
+    disabled: The user has been disabled. Please contact the administrator.
+  not:
+    login: Not logged in
+  too:
+    many:
+      attempts: Too many failed login attempts. Please try again in 15 minutes.
+  "no":
+    permission: No permission
+  access:
+    denied: Access denied
+
+resource:
+  "no":
+    permission: No permission to delete this resource
+
+user:
+  username:
+    exists: Username already exists
+  email:
+    exists: Email already exists
+  password:
+    empty: Password cannot be empty
+    not:
+      match: Passwords do not match
+
+email:
+  subject:
+    forget:
+      password: "[Intelligent Knowledge Base Q&A System - Forgot Password]"
+    modify:
+      password: "[Intelligent Knowledge Base Q&A System - Modify Password]"
+  test:
+    connect:
+      failed: Test connection failed
+
+application:
+  token:
+    invalid:
+      or:
+        disabled: Token is invalid or disabled
+  access:
+    white:
+      list:
+        required: Illegal access. Please contact the administrator to add the whitelist.
+  not:
+    published: The application has not been published. Please publish it before use.
+    found: Application not found
+  app:
+    not:
+      found: No app was found
+    type:
+      not:
+        found: No appType was found
+  file:
+    format:
+      error: Invalid file format
+
+model:
+  name:
+    exists: Model name already exists
+    not:
+      found: Model not found
+  params:
+    invalid: Invalid model parameters. Please check the model configuration.
+
+chat:
+  token:
+    invalid:
+      or:
+        disabled: Token is invalid or disabled
+
+tool:
+  not:
+    found: Tool not found
+  config:
+    invalid: Please check the configuration information
+  groovy:
+    script:
+      execution:
+        timeout: Script execution timed out (exceeded {0} seconds) and was forcibly terminated
+        failed: "Script execution failed: {0}"
+        interrupted: Script execution was interrupted
+      dangerous:
+        call: "Script contains a disallowed dangerous call: {0}"
+  skill:
+    directory:
+      create:
+        failed: "Failed to create skill directory: {0}"
+    zip:
+      entry:
+        outside:
+          target: "Zip entry is outside target directory: {0}"
+      extract:
+        failed: Failed to extract skill zip file
+    file:
+      extract:
+        failed: Failed to extract the skill file.
+      format:
+        invalid: Please upload a valid zip archive.
+      missing:
+        skill:
+          md: SKILL.md is missing in the archive.
+
+trigger:
+  schedule:
+    type:
+      required: Please select a trigger cycle
+  event:
+    not:
+      found: Event trigger does not exist
+    type:
+      invalid: The trigger is not of webhook type
+    disabled: Event trigger has been disabled
+  token:
+    auth:
+      failed: Token authentication failed
+workflow:
+  condition:
+    "no":
+      match: The condition node did not match any branch
+
+knowledge:
+  split:
+    pattern:
+      invalid: "Invalid split pattern: {0}"
