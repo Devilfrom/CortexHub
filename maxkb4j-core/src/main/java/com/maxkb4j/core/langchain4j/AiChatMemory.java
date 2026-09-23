@@ -1,0 +1,86 @@
+package com.maxkb4j.core.langchain4j;
+
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.memory.ChatMemory;
+import dev.langchain4j.service.memory.ChatMemoryService;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
+
+import static dev.langchain4j.internal.ValidationUtils.ensureNotNull;
+
+public class AiChatMemory implements ChatMemory {
+    private final Object id;
+    private final List<ChatMessage> messages;
+
+
+    private AiChatMemory(Builder builder) {
+        this.id = ensureNotNull(builder.id, "id");
+        this.messages = builder.messages != null ? builder.messages : new ArrayList<>();
+    }
+
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    public static AiChatMemory withMessages(Object chatId, List<ChatMessage> messages) {
+        List<ChatMessage> historyMessages = new ArrayList<>(messages.size());
+        historyMessages.addAll(messages);
+        if (Objects.nonNull(chatId)) {
+            return builder().id(chatId).messages(historyMessages).build();
+        }
+        // 不能使用 List.of()：不可变列表会导致后续 add() 抛 UnsupportedOperationException
+        return builder().messages(new ArrayList<>()).build();
+    }
+
+    @Override
+    public Object id() {
+        return id;
+    }
+
+    @Override
+    public void add(ChatMessage message) {
+        if (message instanceof SystemMessage) {
+            messages.addFirst(message);
+        } else {
+            messages.add(message);
+        }
+    }
+
+    @Override
+    public List<ChatMessage> messages() {
+        return messages;
+    }
+
+    @Override
+    public void clear() {
+    }
+
+    public static class Builder {
+
+        private Object id = ChatMemoryService.DEFAULT;
+        private List<ChatMessage> messages;
+
+        /**
+         * @param id The ID of the {@link ChatMemory}.
+         *           If not provided, a "default" will be used.
+         * @return builder
+         */
+        public Builder id(Object id) {
+            this.id = id;
+            return this;
+        }
+
+
+        public Builder messages(List<ChatMessage> messages) {
+            this.messages = messages;
+            return this;
+        }
+
+        public AiChatMemory build() {
+            return new AiChatMemory(this);
+        }
+    }
+}
