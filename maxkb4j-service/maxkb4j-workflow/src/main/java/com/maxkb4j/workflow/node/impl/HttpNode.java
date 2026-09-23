@@ -1,0 +1,43 @@
+package com.maxkb4j.workflow.node.impl;
+
+import com.maxkb4j.workflow.annotation.NodeCreatorType;
+import com.maxkb4j.workflow.enums.NodeType;
+
+import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
+import com.maxkb4j.workflow.model.IWorkflow;
+import com.maxkb4j.workflow.node.AbsNode;
+import lombok.Data;
+
+import java.util.Map;
+
+import static com.maxkb4j.workflow.consts.WorkflowConstants.*;
+
+@NodeCreatorType(NodeType.HTTP_CLIENT)
+public class HttpNode extends AbsNode {
+
+    public HttpNode(String id, JSONObject properties) {
+        super(id, properties);
+    }
+
+    @Override
+    public void saveContext(IWorkflow workflow, Map<String, Object> detail) {
+        context.put(HttpField.STATUS, detail.get(HttpField.STATUS));
+        context.put(HttpField.BODY, detail.get(HttpField.BODY));
+    }
+
+    @Data
+    public static class NodeParams {
+        private String url;
+        private String method;
+        private String body;
+        private JSONArray headers;
+        private JSONArray params;
+        private Integer timeout;
+        private String authType;
+        private String username;
+        private String password;
+        private String token;
+    }
+
+}

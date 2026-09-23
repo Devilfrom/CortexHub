@@ -1,0 +1,49 @@
+package com.maxkb4j.workflow.handler.node.impl;
+
+
+import com.maxkb4j.common.domain.dto.OssFile;
+import com.maxkb4j.model.service.IModelProviderService;
+import com.maxkb4j.model.base.TTSModel;
+import com.maxkb4j.oss.service.IOssService;
+import com.maxkb4j.workflow.annotation.NodeHandlerType;
+import com.maxkb4j.workflow.enums.NodeType;
+import com.maxkb4j.workflow.handler.node.AbsNodeHandler;
+import com.maxkb4j.workflow.model.ModelConfig;
+import com.maxkb4j.workflow.model.NodeResult;
+import com.maxkb4j.workflow.model.IWorkflow;
+import com.maxkb4j.workflow.node.AbsNode;
+import com.maxkb4j.workflow.node.impl.TextToSpeechNode;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+import static com.maxkb4j.workflow.consts.WorkflowConstants.*;
+
+@NodeHandlerType(NodeType.TEXT_TO_SPEECH)
+@RequiredArgsConstructor
+@Component
+public class TextToSpeechNodeHandler extends AbsNodeHandler {
+
+    private final IOssService ossService;
+    private final IModelProviderService modelFactory;
+
+    @Override
+    protected NodeResult doExecute(IWorkflow workflow, AbsNode node) throws Exception {
+        TextToSpeechNode.NodeParams params = parseParams(node, TextToSpeechNode.NodeParams.class);
+        ModelConfig modelConfig = resolveModelConfig(workflow, params);
+        TTSModel ttsModel = modelFactory.buildTTSModel(modelConfig.getModelId(), modelConfig.getModelParamsSetting());
+        List<String> contentList = params.getContentList();
+        Object content = workflow.getReferenceField(contentList);
+        byte[] audioData = ttsModel.textToSpeech(content.toString());
+        OssFile ossFile = ossService.uploadFile(AudioField.GENERATED_AUDIO_PREFIX + UUID.randomUUID() + AudioField.MP3_SUFFIX, audioData);
+        putDetail(node, NodeField.CONTENT, content);
+        if (params.getIsResult()) {
+            String answer = "<audio src=\"" + ossFile.getUrl() + "\" controls style=\"width: 300px; height: 43px\"></audio>";
+            setAnswerText(node, answer);
+        }
+        return new NodeResult(Map.of(NodeField.RESULT, List.of(ossFile)));
+    }
+}
