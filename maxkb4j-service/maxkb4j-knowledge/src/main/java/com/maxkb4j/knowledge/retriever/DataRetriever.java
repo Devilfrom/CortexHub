@@ -1,0 +1,71 @@
+package com.maxkb4j.knowledge.retriever;
+
+import com.baomidou.mybatisplus.core.toolkit.CollectionUtils;
+import com.maxkb4j.knowledge.consts.SearchType;
+import com.maxkb4j.knowledge.retrieval.SearchMode;
+import com.maxkb4j.knowledge.retrieval.SearchRequest;
+import com.maxkb4j.knowledge.service.IDocumentInternalService;
+import com.maxkb4j.knowledge.store.IDataStore;
+import com.maxkb4j.knowledge.vo.TextChunkVO;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Unified data retriever that supports multiple search modes
+ */
+@Slf4j
+@Component
+public class DataRetriever {
+
+    private static final Map<String, SearchMode> SEARCH_MODE_MAP = Map.of(
+            SearchType.EMBEDDING, SearchMode.VECTOR,
+            SearchType.FULL_TEXT, SearchMode.FULL_TEXT,
+            SearchType.HYBRID, SearchMode.HYBRID
+    );
+    private final IDataStore vectorStore;
+    private final IDataStore fullTextStore;
+    private final IDataStore compositeStore;
+    private final IDocumentInternalService documentService;
+    private final SearchOrchestrator searchOrchestrator;
+
+    public DataRetriever(@Qualifier("vectorStore") IDataStore vectorStore,
+                         @Qualifier("fullTextStore") IDataStore fullTextStore,
+                         @Qualifier("compositeStore") IDataStore compositeStore,
+                         IDocumentInternalService documentService,
+                         SearchOrchestrator searchOrchestrator) {
+        this.vectorStore = vectorStore;
+        this.fullTextStore = fullTextStore;
+        this.compositeStore = compositeStore;
+        this.documentService = documentService;
+        this.searchOrchestrator = searchOrchestrator;
+    }
+
+    public List<TextChunkVO> search(List<String> knowledgeIds, List<String> excludeParagraphIds,
+                                    String keyword, int maxResults, float minScore, String searchMode) {
+        SearchRequest request = new SearchRequest();
+        request.setKnowledgeIds(knowledgeIds);
+        request.setExcludeParagraphIds(excludeParagraphIds);
+        request.setQuery(keyword);
+        request.setTopK(maxResults);
+        request.setMinScore(minScore);
+        request.setMode(SEARCH_MODE_MAP.get(searchMode));
+        List<String> excludeDocIds = documentService.getNoActiveDocIds(knowledgeIds);
+        if (CollectionUtils.isNotEmpty(excludeDocIds)) {
+            request.setExcludeDocumentIds(excludeDocIds);
+        }
+        return searchOrchestrator.search(getStore(searchMode), request);
+    }
+
+    private IDataStore getStore(String searchMode) {
+        return switch (searchMode) {
+            case SearchType.EMBEDDING -> vectorStore;
+            case SearchType.FULL_TEXT -> fullTextStore;
+            case SearchType.HYBRID -> compositeStore;
+            default -> throw new IllegalArgumentException("Unknown search mode: " + searchMode);
+        };
+    }
+}
