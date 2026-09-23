@@ -1,0 +1,290 @@
+package com.maxkb4j.application.service.impl;
+
+import com.alibaba.excel.EasyExcel;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.baomidou.mybatisplus.core.toolkit.CollectionUtils;
+import com.baomidou.mybatisplus.core.toolkit.IdWorker;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.maxkb4j.application.builder.ChatServiceBuilder;
+import com.maxkb4j.application.dto.ApplicationChatDTO;
+import com.maxkb4j.application.dto.ChatQueryDTO;
+import com.maxkb4j.application.dto.ChatResponse;
+import com.maxkb4j.application.dto.ShareChatDTO;
+import com.maxkb4j.application.entity.*;
+import com.maxkb4j.application.enums.ShareLinkType;
+import com.maxkb4j.application.excel.ChatRecordDetailExcel;
+import com.maxkb4j.application.handler.PostResponseHandler;
+import com.maxkb4j.application.mapper.ApplicationChatMapper;
+import com.maxkb4j.application.mapper.ApplicationChatShareLinkMapper;
+import com.maxkb4j.application.service.*;
+import com.maxkb4j.application.vo.ApplicationChatRecordVO;
+import com.maxkb4j.application.vo.ApplicationVO;
+import com.maxkb4j.application.vo.ChatRecordDetailVO;
+import com.maxkb4j.application.vo.ShareChatVO;
+import com.maxkb4j.common.cache.ChatCache;
+import com.maxkb4j.common.domain.dto.ChatInfo;
+import com.maxkb4j.common.domain.dto.ChatMessageVO;
+import com.maxkb4j.common.domain.dto.ChatParams;
+import com.maxkb4j.common.domain.dto.ChatRecordDTO;
+import com.maxkb4j.common.domain.dto.ChatState;
+import com.maxkb4j.common.exception.AccessNumLimitException;
+import com.maxkb4j.common.exception.ApiException;
+import com.maxkb4j.common.util.BeanUtil;
+import com.maxkb4j.common.util.StpKit;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.core.task.TaskExecutor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import reactor.core.publisher.Sinks;
+
+import java.io.IOException;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
+
+/**
+ * @author tarzan
+ * @date 2024-12-26 09:50:23
+ */
+@Service
+@RequiredArgsConstructor
+public class ApplicationChatServiceImpl extends ServiceImpl<ApplicationChatMapper, ApplicationChatEntity> implements IApplicationChatInternalService {
+
+    private final IApplicationChatRecordInternalService chatRecordService;
+    private final IApplicationInternalService applicationService;
+    private final ApplicationChatUserStatsService chatUserStatsService;
+    private final IApplicationAccessTokenInternalService accessTokenService;
+    private final ApplicationVersionService applicationVersionService;
+    private final PostResponseHandler postResponseHandler;
+    private final TaskExecutor chatTaskExecutor;
+    private final ApplicationChatShareLinkMapper chatShareLinkMapper;
+
+
+    public IPage<ApplicationChatEntity> chatLogs(String appId, int page, int size, ChatQueryDTO query) {
+        return baseMapper.chatLogs(new Page<>(page, size), appId, query);
+    }
+
+
+    public String chatOpen(String appId, boolean debug) {
+        if (!debug) {
+            long count = applicationVersionService.lambdaQuery().eq(ApplicationVersionEntity::getApplicationId, appId).count();
+            if (count == 0) {
+                throw new ApiException("application.not.published");
+            }
+        }
+        ChatInfo chatInfo = new ChatInfo(IdWorker.get32UUID(), appId);
+        ChatCache.put(chatInfo.getChatId(), chatInfo);
+        return chatInfo.getChatId();
+    }
+
+
+    public ChatInfo getChatInfo(String chatId, String appId) {
+        ChatInfo chatInfo = ChatCache.get(chatId);
+        if (chatInfo == null) {
+            if (StringUtils.isBlank(appId)) {
+                ApplicationChatEntity chatEntity = this.lambdaQuery().select(ApplicationChatEntity::getApplicationId).eq(ApplicationChatEntity::getId, chatId).one();
+                if (chatEntity != null) {
+                    appId = chatEntity.getApplicationId();
+                }
+            }
+            chatInfo = new ChatInfo(chatId, appId);
+            // ChatInfo.chatRecordList 设计为 CopyOnWriteArrayList 供多线程共享，
+            // 必须包装回并发容器，避免被普通 ArrayList 覆盖后并发写导致记录丢失/越界
+            chatInfo.setChatRecordList(new CopyOnWriteArrayList<>(chatRecordService.getChatRecords(chatId)));
+            ChatCache.put(chatInfo.getChatId(), chatInfo);
+            return chatInfo;
+        }
+        return chatInfo;
+    }
+
+    public ChatResponse chatMessage(ChatParams chatParams, ChatState chatState, Sinks.Many<ChatMessageVO> sink) {
+        long startTime = System.currentTimeMillis();
+        if (visitCountOver(chatState)) {
+            sink.tryEmitError(new AccessNumLimitException());
+            return new ChatResponse(List.of(), null);
+        }
+        ChatInfo chatInfo = this.getChatInfo(chatParams.getChatId(), chatState.getAppId());
+        List<ChatRecordDTO> historyChatRecordList = chatInfo.getChatRecordList();
+        chatState.setHistoryChatRecords(historyChatRecordList);
+        if (StringUtils.isNotBlank(chatParams.getChatRecordId())) {
+            ChatRecordDTO chatRecord = historyChatRecordList.stream().filter(e -> Objects.equals(e.getId(), chatParams.getChatRecordId())).findFirst().orElse(null);
+            chatState.setChatRecord(chatRecord);
+        } else {
+            chatParams.setChatRecordId(IdWorker.get32UUID());
+        }
+        ApplicationVO application = applicationService.getAppDetail(chatInfo.getAppId(), chatState.getDebug());
+        if (Objects.isNull(application)) {
+            sink.tryEmitError(new ApiException("application.not.found"));
+            return new ChatResponse(List.of(), null);
+        }
+        IChatService chatService = ChatServiceBuilder.getChatService(application.getType());
+        ChatResponse chatResponse = chatService.chatMessage(application, chatParams, chatState, sink);
+        postResponseHandler.handler(chatParams, chatState, chatResponse, startTime);
+        sink.tryEmitNext(new ChatMessageVO(chatParams.getChatId(), chatParams.getChatRecordId(), true));
+        sink.tryEmitComplete();
+        return chatResponse;
+    }
+
+    /**
+     * 异步执行对话，并负责 SSE 流的统一收尾。
+     * <p>
+     * sink 错误出口唯一：业务抛出异常时由本方法的 whenComplete 统一 tryEmitError；
+     * 业务正常返回时由业务侧自行 emit 终止信号，本方法不再重复 emit。
+     * 约定：下层（pipeline/workflow）不得先向 sink emit 错误再抛异常，否则会重复收尾。
+     * </p>
+     */
+    public void chatMessageAsync(ChatParams chatParams, ChatState chatState, Sinks.Many<ChatMessageVO> sink) {
+        CompletableFuture
+                .runAsync(() -> chatMessage(chatParams, chatState, sink), chatTaskExecutor)
+                .whenComplete((ignored, throwable) -> {
+                    if (throwable == null) {
+                        return;
+                    }
+                    log.error("Async chatMessage failed", throwable);
+                    Sinks.EmitResult result = sink.tryEmitError(throwable);
+                    if (result.isFailure()) {
+                        log.debug("SSE sink already terminated, skip error emit: " + result);
+                    }
+                });
+    }
+
+    /**
+     * 判断当日访问次数是否已达上限。
+     * <p>
+     * 统计行通过数据库唯一索引 (chat_user_id, application_id) + ON CONFLICT DO NOTHING
+     * 原子创建，计数通过 UPDATE ... +1 原子自增，避免并发下的重复行与丢失更新。
+     * </p>
+     */
+    public boolean visitCountOver(ChatState chatState) {
+        String appId = chatState.getAppId();
+        String chatUserId = chatState.getChatUserId();
+        boolean debug = chatState.getDebug();
+        if (debug || Objects.isNull(appId)) {
+            return false;
+        }
+        boolean firstVisit = chatUserStatsService.ensureStatsExists(chatUserId, chatState.getChatUserType(), appId);
+        if (firstVisit) {
+            // 首次访问尚无计数，保持原语义直接放行
+            return false;
+        }
+        ApplicationAccessTokenEntity appAccessToken = accessTokenService.accessToken(appId);
+        if (Objects.isNull(appAccessToken) || Objects.isNull(appAccessToken.getAccessNum())) {
+            return false;
+        }
+        ApplicationChatUserStatsEntity chatUserStats = chatUserStatsService.getByUserIdAndAppId(chatUserId, appId);
+        return Objects.nonNull(chatUserStats)
+                && chatUserStats.getIntraDayAccessNum() >= appAccessToken.getAccessNum();
+    }
+
+
+    public void chatExport(List<String> ids, HttpServletResponse response) throws IOException {
+        if (CollectionUtils.isNotEmpty(ids)) {
+            List<ChatRecordDetailVO> list = baseMapper.chatRecordDetail(ids);
+            List<ChatRecordDetailExcel> rows = BeanUtil.copyList(list, ChatRecordDetailExcel.class);
+            EasyExcel.write(response.getOutputStream(), ChatRecordDetailExcel.class).sheet("sheet").doWrite(rows);
+        }
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    public Boolean deleteById(String chatId) {
+        chatRecordService.lambdaUpdate().eq(ApplicationChatRecordEntity::getChatId, chatId).remove();
+        ChatCache.remove(chatId);
+        return this.removeById(chatId);
+    }
+
+    @Override
+    public boolean updateByApplicationId(String appId, String chatId, ApplicationChatEntity chatEntity) {
+        if (belongsToApp(chatId, appId)) {
+            ApplicationChatEntity entity = new ApplicationChatEntity();
+            entity.setId(chatId);
+            entity.setSummary(chatEntity.getSummary());
+            entity.setMarkSum(chatEntity.getMarkSum());
+            return this.updateById(entity);
+        }
+        return false;
+    }
+
+    @Override
+    public boolean deleteByApplicationId(String appId, String chatId) {
+        if (belongsToApp(chatId, appId)) {
+            return this.removeById(chatId);
+        }
+        return false;
+    }
+
+    private boolean belongsToApp(String chatId, String appId) {
+        return this.lambdaQuery()
+                .eq(ApplicationChatEntity::getId, chatId)
+                .eq(ApplicationChatEntity::getApplicationId, appId)
+                .count() > 0;
+    }
+
+    private boolean isOwnedBy(String chatId, String appId, String userId) {
+        return this.lambdaQuery()
+                .eq(ApplicationChatEntity::getId, chatId)
+                .eq(ApplicationChatEntity::getApplicationId, appId)
+                .eq(ApplicationChatEntity::getChatUserId, userId)
+                .count() > 0;
+    }
+
+    @Override
+    public Map<String, String> shareChat(String id, String chatId, ShareChatDTO dto) {
+        ApplicationChatShareLinkEntity chatShareLink = new ApplicationChatShareLinkEntity();
+        chatShareLink.setChatId(chatId);
+        chatShareLink.setApplicationId(id);
+        chatShareLink.setUserId(StpKit.USER.getLoginIdAsString());
+        chatShareLink.setChatRecordIds(dto.getChatRecordIds());
+        chatShareLink.setShareType(ShareLinkType.PUBLIC.name());
+        chatShareLinkMapper.insert(chatShareLink);
+        return Map.of("link", chatShareLink.getId());
+    }
+
+    @Override
+    public IPage<ApplicationChatDTO> page(String appId, String userId, int current, int size) {
+        Page<ApplicationChatEntity> page = new Page<>(current, size);
+        LambdaQueryWrapper<ApplicationChatEntity> wrapper = Wrappers.lambdaQuery();
+        wrapper.eq(ApplicationChatEntity::getApplicationId, appId).eq(ApplicationChatEntity::getChatUserId, userId);
+        wrapper.orderByDesc(ApplicationChatEntity::getCreateTime);
+        return BeanUtil.copyPage(this.page(page, wrapper), ApplicationChatDTO.class);
+    }
+
+    @Override
+    public boolean clear(String appId, String userId) {
+        LambdaQueryWrapper<ApplicationChatEntity> wrapper = Wrappers.lambdaQuery();
+        wrapper.eq(ApplicationChatEntity::getApplicationId, appId).eq(ApplicationChatEntity::getChatUserId, userId);
+        return this.remove(wrapper);
+    }
+
+    @Override
+    public boolean updateDtoById(ApplicationChatDTO applicationChatDTO) {
+        ApplicationChatEntity entity = new ApplicationChatEntity();
+        entity.setId(applicationChatDTO.getId());
+        entity.setSummary(applicationChatDTO.getSummary());
+        entity.setStarNum(applicationChatDTO.getStarNum());
+        entity.setTrampleNum(applicationChatDTO.getTrampleNum());
+        entity.setMarkSum(applicationChatDTO.getMarkSum());
+        return this.updateById(entity);
+    }
+
+    @Override
+    public ShareChatVO shareChat(String id) {
+        ShareChatVO shareChatVO = new ShareChatVO();
+        ApplicationChatShareLinkEntity chatShareLink = chatShareLinkMapper.selectById(id);
+        if (chatShareLink == null) {
+            throw new ApiException("common.record.not.exists");
+        }
+        ApplicationChatEntity chatEntity = this.lambdaQuery().select(ApplicationChatEntity::getSummary).eq(ApplicationChatEntity::getId, chatShareLink.getChatId()).one();
+        shareChatVO.setSummary(chatEntity != null ? chatEntity.getSummary() : null);
+        List<ApplicationChatRecordVO> chatRecordList = chatRecordService.listVOByIds(chatShareLink.getChatRecordIds());
+        shareChatVO.setChatRecordList(chatRecordList);
+        return shareChatVO;
+    }
+
+}
