@@ -1,0 +1,20 @@
+package com.maxkb4j.system.service;
+
+import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.maxkb4j.system.entity.FolderEntity;
+import com.maxkb4j.system.mapper.FolderMapper;
+import com.maxkb4j.system.vo.FolderVO;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+
+@RequiredArgsConstructor
+@Service
+public class FolderService extends ServiceImpl<FolderMapper, FolderEntity> {
+
+    public List<FolderVO> tree(String source) {
+        return List.of(new FolderVO("default", ""));
+    }
+
+}
