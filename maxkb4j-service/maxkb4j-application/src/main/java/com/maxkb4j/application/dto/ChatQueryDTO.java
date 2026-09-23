@@ -1,0 +1,15 @@
+package com.maxkb4j.application.dto;
+
+import lombok.Data;
+
+
+@Data
+public class ChatQueryDTO {
+
+    private String summary;
+    private String username;
+    private String startTime;
+    private String endTime;
+    private Integer minStar;
+    private Integer minTrample;
+}

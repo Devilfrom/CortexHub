@@ -1,0 +1,64 @@
+package com.maxkb4j.application.controller;
+
+import com.baomidou.mybatisplus.core.metadata.IPage;
+import com.maxkb4j.application.dto.ChatQueryDTO;
+import com.maxkb4j.application.dto.ChatUpdateDTO;
+import com.maxkb4j.application.entity.ApplicationChatEntity;
+import com.maxkb4j.application.vo.ApplicationChatVO;
+import com.maxkb4j.application.service.IApplicationChatInternalService;
+import com.maxkb4j.common.annotation.SaCheckPerm;
+import com.maxkb4j.common.api.R;
+import com.maxkb4j.common.util.BeanUtil;
+import com.maxkb4j.common.constant.AppConst;
+import com.maxkb4j.common.enums.PermissionEnum;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.bind.annotation.*;
+
+import java.io.IOException;
+import java.util.List;
+
+/**
+ * @author tarzan
+ * @date 2024-12-25 13:09:54
+ */
+@Tag(name = "APP会话管理", description = "APP会话管理")
+@RestController
+@RequiredArgsConstructor
+@RequestMapping(AppConst.ADMIN_WORKSPACE_API)
+@Slf4j
+public class ApplicationChatController {
+
+    private final IApplicationChatInternalService chatService;
+
+    @SaCheckPerm(PermissionEnum.APPLICATION_EDIT)
+    @PutMapping("/application/{id}/chat/client/{chatId}")
+    public R<Boolean> updateChat(@PathVariable("id") String id, @PathVariable("chatId") String chatId, @RequestBody ChatUpdateDTO dto) {
+        ApplicationChatEntity chatEntity = new ApplicationChatEntity();
+        chatEntity.setSummary(dto.getSummary());
+        chatEntity.setMarkSum(dto.getMarkSum());
+        return R.status(chatService.updateByApplicationId(id, chatId, chatEntity));
+    }
+
+    @SaCheckPerm(PermissionEnum.APPLICATION_DELETE)
+    @DeleteMapping("/application/{id}/chat/client/{chatId}")
+    public R<Boolean> deleteChat(@PathVariable("id") String id, @PathVariable("chatId") String chatId) {
+        return R.status(chatService.deleteByApplicationId(id, chatId));
+    }
+
+    @SaCheckPerm(PermissionEnum.APPLICATION_READ)
+    @GetMapping("/application/{id}/chat/{page}/{size}")
+    public R<IPage<ApplicationChatVO>> chatLogs(@PathVariable("id") String id, @PathVariable("page") int page, @PathVariable("size") int size, ChatQueryDTO query) {
+        return R.data(BeanUtil.copyPage(chatService.chatLogs(id, page, size, query), ApplicationChatVO.class));
+    }
+
+    @SaCheckPerm(PermissionEnum.APPLICATION_EXPORT)
+    @PostMapping("/application/{id}/chat/export")
+    public void export(@PathVariable String id, @RequestBody List<String> selectIds, HttpServletResponse response) throws IOException {
+        chatService.chatExport(selectIds, response);
+    }
+
+
+}

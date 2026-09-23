@@ -1,0 +1,56 @@
+package com.maxkb4j.application.controller;
+
+import com.maxkb4j.application.entity.ApplicationApiKeyEntity;
+import com.maxkb4j.application.dto.ApiKeyUpdateDTO;
+import com.maxkb4j.application.vo.ApplicationApiKeyVO;
+import com.maxkb4j.application.service.IApplicationApiKeyInternalService;
+import com.maxkb4j.common.annotation.SaCheckPerm;
+import com.maxkb4j.common.constant.AppConst;
+import com.maxkb4j.common.api.R;
+import com.maxkb4j.common.util.BeanUtil;
+import com.maxkb4j.common.enums.PermissionEnum;
+import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+
+/**
+ * @author tarzan
+ * @date 2024-12-25 13:09:54
+ */
+@RestController
+@RequestMapping(AppConst.ADMIN_WORKSPACE_API)
+@RequiredArgsConstructor
+public class ApplicationKeyController {
+
+    private final IApplicationApiKeyInternalService apiKeyService;
+
+    @SaCheckPerm(PermissionEnum.APPLICATION_READ)
+    @GetMapping("/application/{id}/application_key")
+    public R<List<ApplicationApiKeyVO>> listApikey(@PathVariable("id") String id) {
+        return R.data(BeanUtil.copyList(apiKeyService.listApikey(id), ApplicationApiKeyVO.class));
+    }
+
+    @SaCheckPerm(PermissionEnum.APPLICATION_CREATE)
+    @PostMapping("/application/{id}/application_key")
+    public R<Boolean> createApikey(@PathVariable("id") String id) {
+        return R.status(apiKeyService.createApikey(id));
+    }
+
+    @SaCheckPerm(PermissionEnum.APPLICATION_EDIT)
+    @PutMapping("/application/{id}/application_key/{apiKeyId}")
+    public R<Boolean> updateApikey(@PathVariable("id") String id, @PathVariable("apiKeyId") String apiKeyId, @RequestBody ApiKeyUpdateDTO dto) {
+        ApplicationApiKeyEntity apiKeyEntity = new ApplicationApiKeyEntity();
+        apiKeyEntity.setIsActive(dto.getIsActive());
+        apiKeyEntity.setAllowCrossDomain(dto.getAllowCrossDomain());
+        apiKeyEntity.setCrossDomainList(dto.getCrossDomainList());
+        return R.status(apiKeyService.updateApikey(id, apiKeyId, apiKeyEntity));
+    }
+
+    @SaCheckPerm(PermissionEnum.APPLICATION_DELETE)
+    @DeleteMapping("/application/{id}/application_key/{apiKeyId}")
+    public R<Boolean> deleteApikey(@PathVariable("id") String id, @PathVariable("apiKeyId") String apiKeyId) {
+        return R.status(apiKeyService.deleteApikey(id, apiKeyId));
+    }
+
+}
