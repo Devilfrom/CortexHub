@@ -1,0 +1,275 @@
+package com.maxkb4j.model.provider;
+
+import com.alibaba.fastjson.JSONObject;
+import com.maxkb4j.model.form.BaseField;
+import com.maxkb4j.model.entity.ModelCredential;
+import com.maxkb4j.core.assistant.Assistant;
+import com.maxkb4j.model.custom.credential.ModelCredentialForm;
+import com.maxkb4j.model.custom.params.ImageModelParams;
+import com.maxkb4j.model.custom.params.OpenAiChatModelParams;
+import com.maxkb4j.model.enums.ModelType;
+import com.maxkb4j.model.base.STTModel;
+import com.maxkb4j.model.base.TTSModel;
+import com.maxkb4j.model.vo.ModelInfo;
+import dev.langchain4j.http.client.HttpClientBuilder;
+import dev.langchain4j.http.client.spring.restclient.SpringRestClient;
+import dev.langchain4j.http.client.spring.restclient.SpringRestClientBuilder;
+import dev.langchain4j.model.ModelDisabledException;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.DisabledChatModel;
+import dev.langchain4j.model.chat.DisabledStreamingChatModel;
+import dev.langchain4j.model.chat.StreamingChatModel;
+import dev.langchain4j.model.embedding.DisabledEmbeddingModel;
+import dev.langchain4j.model.embedding.EmbeddingModel;
+import dev.langchain4j.model.image.DisabledImageModel;
+import dev.langchain4j.model.image.ImageModel;
+import dev.langchain4j.model.scoring.ScoringModel;
+import dev.langchain4j.service.AiServices;
+import org.springframework.core.task.VirtualThreadTaskExecutor;
+import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
+import org.springframework.web.client.RestClient;
+import reactor.core.publisher.Flux;
+
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * Abstract base class for model providers
+ * Defines the contract for all model providers in the system
+ */
+public abstract class AbsModelProvider {
+
+    private SpringRestClientBuilder springRestClientBuilder;
+
+    protected synchronized HttpClientBuilder getHttpClientBuilder() {
+        if (springRestClientBuilder == null) {
+            HttpComponentsClientHttpRequestFactory requestFactory = new HttpComponentsClientHttpRequestFactory();
+            requestFactory.setConnectTimeout(60_000);
+            requestFactory.setReadTimeout(600_000);
+            RestClient.Builder restClientBuilder = RestClient.builder()
+                    .requestFactory(requestFactory);
+            this.springRestClientBuilder = SpringRestClient.builder()
+                    .restClientBuilder(restClientBuilder)
+                    .streamingRequestExecutor(new VirtualThreadTaskExecutor());
+        }
+        return springRestClientBuilder;
+    }
+
+
+    /**
+     * Gets double value from params with null safety
+     *
+     * @param params the params JSONObject
+     * @param key    the key to lookup
+     * @return the double value or null if not present
+     */
+    protected Double getDoubleParam(JSONObject params, String key) {
+        return Optional.ofNullable(params).map(p -> p.getDouble(key)).orElse(null);
+    }
+
+    /**
+     * Gets integer value from params with null safety
+     *
+     * @param params the params JSONObject
+     * @param key    the key to lookup
+     * @return the integer value or null if not present
+     */
+    protected Integer getIntParam(JSONObject params, String key) {
+        return Optional.ofNullable(params).map(p -> p.getInteger(key)).orElse(null);
+    }
+
+    /**
+     * Gets string value from params with null safety
+     *
+     * @param params the params JSONObject
+     * @param key    the key to lookup
+     * @return the string value or null if not present
+     */
+    protected String getStringParam(JSONObject params, String key) {
+        return Optional.ofNullable(params).map(p -> p.getString(key)).orElse(null);
+    }
+
+    /**
+     * Gets boolean value from params with null safety
+     *
+     * @param params the params JSONObject
+     * @param key    the key to lookup
+     * @return the boolean value or null if not present
+     */
+    protected Boolean getBooleanParam(JSONObject params, String key) {
+        return Optional.ofNullable(params).map(p -> p.getBoolean(key)).orElse(false);
+    }
+
+
+    /**
+     * Checks if the provider supports a specific model type
+     *
+     * @param modelType the model type to check
+     * @return true if supported, false otherwise
+     */
+    public boolean isSupport(ModelType modelType) {
+        return getModelList().stream().anyMatch(e -> e.getModelType().equals(modelType));
+    }
+
+    /**
+     * Gets model info for a specific model type and name
+     *
+     * @param modelType the model type
+     * @param modelName the model name
+     * @return the model info or null if not found
+     */
+    public ModelInfo getModelInfo(ModelType modelType, String modelName) {
+        return getModelList().stream()
+                .filter(modelInfo ->
+                        modelInfo.getModelType().equals(modelType) &&
+                                modelInfo.getName().equals(modelName))
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
+     * Gets the model credential form configuration
+     *
+     * @return the credential form configuration
+     */
+    public ModelCredentialForm getModelCredential() {
+        return new ModelCredentialForm(false, true);
+    }
+
+    /**
+     * Gets the list of available models for this provider
+     *
+     * @return list of model info
+     */
+    public abstract List<ModelInfo> getModelList();
+
+
+    public void modelIsValid(String modelType, String modelName, ModelCredential credential, JSONObject params) {
+        if (modelType != null) {
+            if (ModelType.LLM.getKey().equals(modelType) || ModelType.VISION.getKey().equals(modelType)) {
+                StreamingChatModel model = buildStreamingChatModel(modelName, credential, params);
+                Assistant assistant = AiServices.create(Assistant.class, model);
+                Flux<String> flux = assistant.chatFlux("only say ok");
+                // 同步阻塞，异常才能在当前请求线程冒泡，被 GlobalExceptionHandler 捕获
+                flux.blockLast();
+            } else if (ModelType.EMBEDDING.getKey().equals(modelType)) {
+                EmbeddingModel model = buildEmbeddingModel(modelName, credential, params);
+                model.embed("ok");
+            } else if (ModelType.RERANKER.getKey().equals(modelType)) {
+                ScoringModel model = buildScoringModel(modelName, credential, params);
+                model.score("ok", "ok");
+            }
+        }
+    }
+
+
+    /**
+     * Builds a chat model instance
+     *
+     * @param modelName  the model name
+     * @param credential the model credentials
+     * @param params     additional parameters
+     * @return the chat model instance
+     */
+    public ChatModel buildChatModel(String modelName, ModelCredential credential, JSONObject params) {
+        return new DisabledChatModel();
+    }
+
+    /**
+     * Builds a streaming chat model instance
+     *
+     * @param modelName  the model name
+     * @param credential the model credentials
+     * @param params     additional parameters
+     * @return the streaming chat model instance
+     */
+    public StreamingChatModel buildStreamingChatModel(String modelName, ModelCredential credential, JSONObject params) {
+        return new DisabledStreamingChatModel();
+    }
+
+    /**
+     * Builds an embedding model instance
+     *
+     * @param modelName  the model name
+     * @param credential the model credentials
+     * @param params     additional parameters
+     * @return the embedding model instance
+     */
+    public EmbeddingModel buildEmbeddingModel(String modelName, ModelCredential credential, JSONObject params) {
+        return new DisabledEmbeddingModel();
+    }
+
+    /**
+     * Builds an image model instance
+     *
+     * @param modelName  the model name
+     * @param credential the model credentials
+     * @param params     additional parameters
+     * @return the image model instance
+     */
+    public ImageModel buildImageModel(String modelName, ModelCredential credential, JSONObject params) {
+        return new DisabledImageModel();
+    }
+
+    /**
+     * Builds a scoring model instance
+     *
+     * @param modelName  the model name
+     * @param credential the model credentials
+     * @param params     additional parameters
+     * @return the scoring model instance
+     */
+    public ScoringModel buildScoringModel(String modelName, ModelCredential credential, JSONObject params) {
+        throw new ModelDisabledException("ScoringModel is disabled");
+    }
+
+    /**
+     * Builds an STT (speech-to-text) model instance
+     *
+     * @param modelName  the model name
+     * @param credential the model credentials
+     * @param params     additional parameters
+     * @return the STT model instance
+     */
+    public STTModel buildSTTModel(String modelName, ModelCredential credential, JSONObject params) {
+        throw new ModelDisabledException("STTModel is disabled");
+    }
+
+    /**
+     * Builds a TTS (text-to-speech) model instance
+     *
+     * @param modelName  the model name
+     * @param credential the model credentials
+     * @param params     additional parameters
+     * @return the TTS model instance
+     */
+    public TTSModel buildTTSModel(String modelName, ModelCredential credential, JSONObject params) {
+        throw new ModelDisabledException("TTSModel is disabled");
+    }
+
+    public List<BaseField> getModelParamsForm(String modelType) {
+        if (modelType != null) {
+            if (ModelType.LLM.getKey().equals(modelType) || ModelType.VISION.getKey().equals(modelType)) {
+                return getChatModelParamsForm();
+            } else if (ModelType.EMBEDDING.getKey().equals(modelType)) {
+                return getEmbeddingModelParamsForm();
+            } else if (ModelType.TTI.getKey().equals(modelType)) {
+                return getImageModelParamsForm();
+            }
+        }
+        return List.of();
+    }
+
+    protected List<BaseField> getChatModelParamsForm() {
+        return new OpenAiChatModelParams().toForm();
+    }
+
+    protected List<BaseField> getEmbeddingModelParamsForm() {
+        return List.of();
+    }
+
+    protected List<BaseField> getImageModelParamsForm() {
+        return new ImageModelParams().toForm();
+    }
+
+}
