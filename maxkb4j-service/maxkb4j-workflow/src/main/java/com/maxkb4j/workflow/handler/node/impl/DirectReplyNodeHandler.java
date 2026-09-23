@@ -1,0 +1,48 @@
+package com.maxkb4j.workflow.handler.node.impl;
+
+import com.alibaba.fastjson.JSON;
+import com.maxkb4j.common.util.ObjectUtil;
+import com.maxkb4j.workflow.annotation.NodeHandlerType;
+import com.maxkb4j.workflow.enums.NodeType;
+import com.maxkb4j.workflow.enums.ValueType;
+import com.maxkb4j.workflow.handler.node.AbsNodeHandler;
+import com.maxkb4j.workflow.model.NodeResult;
+import com.maxkb4j.workflow.model.IWorkflow;
+import com.maxkb4j.workflow.node.AbsNode;
+import com.maxkb4j.workflow.node.impl.DirectReplyNode;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
+
+import static com.maxkb4j.workflow.consts.WorkflowConstants.*;
+
+@NodeHandlerType(NodeType.REPLY)
+@Component
+public class DirectReplyNodeHandler extends AbsNodeHandler {
+
+
+    @Override
+    protected NodeResult doExecute(IWorkflow workflow, AbsNode node) throws Exception {
+        DirectReplyNode.NodeParams params = parseParams(node, DirectReplyNode.NodeParams.class);
+        AtomicReference<String> answerText = new AtomicReference<>("");
+        if (ValueType.referencing.name().equals(params.getReplyType())) {
+            List<String> fields = params.getFields();
+            Object value = workflow.getReferenceField(fields);
+            if (value == null) {
+                answerText.set(Defaults.NONE);
+            } else if (ObjectUtil.isSimpleType(value)) {
+                answerText.set(value.toString());
+            } else {
+                answerText.set(JSON.toJSONString(value));
+            }
+        } else {
+            answerText.set(workflow.renderPrompt(params.getContent()));
+        }
+        if (params.getIsResult()) {
+            setAnswerText(node, answerText.get());
+        }
+        return new NodeResult(Map.of(NodeField.ANSWER, answerText.get()));
+    }
+}

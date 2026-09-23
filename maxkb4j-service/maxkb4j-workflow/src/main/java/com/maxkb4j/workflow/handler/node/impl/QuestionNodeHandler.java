@@ -1,0 +1,71 @@
+package com.maxkb4j.workflow.handler.node.impl;
+
+import com.maxkb4j.common.util.MessageConverter;
+import com.maxkb4j.core.assistant.Assistant;
+import com.maxkb4j.core.langchain4j.AiChatMemory;
+import com.maxkb4j.core.langchain4j.AiServiceFactory;
+import com.maxkb4j.model.service.IModelProviderService;
+import com.maxkb4j.workflow.annotation.NodeHandlerType;
+import com.maxkb4j.workflow.enums.DialogueType;
+import com.maxkb4j.workflow.enums.NodeType;
+import com.maxkb4j.workflow.handler.node.AbsNodeHandler;
+import com.maxkb4j.workflow.model.ModelConfig;
+import com.maxkb4j.workflow.model.NodeResult;
+import com.maxkb4j.workflow.model.IWorkflow;
+import com.maxkb4j.workflow.node.AbsNode;
+import com.maxkb4j.workflow.node.impl.QuestionNode;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.service.Result;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+import java.util.List;
+import java.util.Map;
+
+import static com.maxkb4j.workflow.consts.WorkflowConstants.*;
+
+@Slf4j
+@NodeHandlerType(NodeType.QUESTION)
+@RequiredArgsConstructor
+@Component
+public class QuestionNodeHandler extends AbsNodeHandler {
+
+    private final IModelProviderService modelFactory;
+
+    @Override
+    protected NodeResult doExecute(IWorkflow workflow, AbsNode node) throws Exception {
+        QuestionNode.NodeParams params = parseParams(node, QuestionNode.NodeParams.class);
+        ModelConfig modelConfig = resolveModelConfig(workflow, params);
+        ChatModel chatModel = modelFactory.buildChatModel(modelConfig.getModelId(), modelConfig.getModelParamsSetting());
+        List<ChatMessage> historyMessages = workflow.getHistoryMessages(params.getDialogueNumber(), DialogueType.WORK_FLOW.name(), node.getRuntimeNodeId());
+
+        putDetail(node, ChatField.HISTORY_MESSAGE, MessageConverter.formatHistoryMessages(historyMessages));
+
+        String question = workflow.renderPrompt(params.getPrompt());
+        String systemPrompt = workflow.renderPrompt(params.getSystem());
+        String chatId = (String) workflow.getGlobalContext().get(ChatField.CHAT_ID);
+        Assistant assistant = AiServiceFactory.builder(Assistant.class)
+                .systemMessage(systemPrompt)
+                .chatMemory(AiChatMemory.withMessages(chatId, historyMessages))
+                .chatModel(chatModel)
+                .build();
+
+        Result<String> result = assistant.chat(question);
+
+        // 使用辅助方法批量写入详情
+        putDetails(node, Map.of(
+                ChatField.SYSTEM, systemPrompt,
+                NodeField.QUESTION, question
+        ));
+
+        recordTokenUsage(node, result.tokenUsage());
+
+        if (params.getIsResult()) {
+            setAnswerText(node, result.content());
+        }
+
+        return new NodeResult(Map.of(NodeField.ANSWER, result.content()));
+    }
+}

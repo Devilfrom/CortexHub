@@ -1,0 +1,117 @@
+package com.maxkb4j.workflow.handler.node.impl;
+
+import com.baomidou.mybatisplus.core.toolkit.CollectionUtils;
+import com.maxkb4j.knowledge.vo.ParagraphRagVO;
+import com.maxkb4j.model.service.IModelProviderService;
+import com.maxkb4j.workflow.annotation.NodeHandlerType;
+import com.maxkb4j.workflow.enums.NodeType;
+import com.maxkb4j.workflow.handler.node.AbsNodeHandler;
+import com.maxkb4j.workflow.model.ModelConfig;
+import com.maxkb4j.workflow.model.NodeResult;
+import com.maxkb4j.workflow.model.IWorkflow;
+import com.maxkb4j.workflow.node.AbsNode;
+import com.maxkb4j.workflow.node.impl.RerankerNode;
+import dev.langchain4j.data.document.Metadata;
+import dev.langchain4j.data.segment.TextSegment;
+import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.scoring.ScoringModel;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import static com.maxkb4j.workflow.consts.WorkflowConstants.*;
+
+
+@Slf4j
+@NodeHandlerType(NodeType.RERANKER)
+@RequiredArgsConstructor
+@Component
+public class RerankerNodeHandler extends AbsNodeHandler {
+
+    private final IModelProviderService modelFactory;
+
+    @Override
+    protected NodeResult doExecute(IWorkflow workflow, AbsNode node) throws Exception {
+        RerankerNode.NodeParams params = parseParams(node, RerankerNode.NodeParams.class);
+        List<String> questionReferenceAddress = params.getQuestionReferenceAddress();
+        String question = getReferenceFieldAsString(workflow, questionReferenceAddress);
+        List<RerankerNode.RerankResult> documentList = new ArrayList<>();
+        List<RerankerNode.RerankResult> resultList = new ArrayList<>();
+        List<List<String>> rerankerReferenceList = params.getRerankerReferenceList();
+
+        if (CollectionUtils.isNotEmpty(rerankerReferenceList)) {
+            double similarity = params.getRerankerSetting().getSimilarity();
+            List<TextSegment> textSegments = getRerankerList(workflow, rerankerReferenceList);
+            ModelConfig modelConfig = resolveModelConfig(workflow, params);
+            // 获取重排序模型实例
+            ScoringModel rerankerModel = modelFactory.buildScoringModel(modelConfig.getModelId());
+            Response<List<Double>> response = rerankerModel.scoreAll(textSegments, question);
+            List<Double> scores = response.content();
+
+            for (int i = 0; i < textSegments.size(); i++) {
+                Double score = scores.get(i);
+                TextSegment textSegment = textSegments.get(i);
+                Map<String, Object> metadata = textSegment.metadata().toMap();
+                metadata.put(NodeField.RELEVANCE_SCORE, score);
+                RerankerNode.RerankResult textSegmentResult = new RerankerNode.RerankResult(textSegment.text(), metadata);
+                documentList.add(textSegmentResult);
+            }
+
+            resultList = documentList.stream().filter(rerankResult -> {
+                if (rerankResult.getMetadata().containsKey(NodeField.RELEVANCE_SCORE)) {
+                    Double score = (Double) rerankResult.getMetadata().get(NodeField.RELEVANCE_SCORE);
+                    return score > similarity;
+                }
+                return false;
+            }).toList();
+
+            int topN = params.getRerankerSetting().getTopN();
+            int endListIndex = Math.min(topN, resultList.size());
+            resultList = resultList.subList(0, endListIndex);
+        }
+
+        String result = String.join("", resultList.stream().map(RerankerNode.RerankResult::getPageContent).toList());
+        int maxParagraphCharNumber = params.getRerankerSetting().getMaxParagraphCharNumber();
+        int endIndex = Math.min(result.length(), maxParagraphCharNumber);
+        result = result.substring(0, endIndex);
+
+        // 使用辅助方法写入详情
+        putDetails(node, Map.of(
+                NodeField.QUESTION, question,
+                NodeField.DOCUMENT_LIST, documentList
+        ));
+
+        return new NodeResult(Map.of(
+                NodeField.RESULT_LIST, resultList,
+                NodeField.RESULT, result
+        ));
+    }
+
+    @SuppressWarnings("unchecked")
+    public List<TextSegment> getRerankerList(IWorkflow workflow, List<List<String>> rerankerReferenceList) {
+        List<TextSegment> textSegments = new ArrayList<>();
+        for (List<String> reference : rerankerReferenceList) {
+            Object value = workflow.getReferenceField(reference);
+            List<ParagraphRagVO> paragraphs = (List<ParagraphRagVO>) value;
+            textSegments.addAll(paragraphs.stream()
+                    .filter(paragraph -> paragraph != null && paragraph.getContent() != null && !paragraph.getContent().isBlank())
+                    .map(paragraph -> {
+                        Map<String, Object> metadata = new HashMap<>();
+                        metadata.put(MetadataField.TITLE, paragraph.getTitle() != null ? paragraph.getTitle() : "");
+                        metadata.put(MetadataField.SIMILARITY, paragraph.getSimilarity());
+                        metadata.put(MetadataField.KNOWLEDGE_TYPE, paragraph.getKnowledgeType() != null ? paragraph.getKnowledgeType() : "");
+                        metadata.put(MetadataField.KNOWLEDGE_NAME, paragraph.getKnowledgeName() != null ? paragraph.getKnowledgeName() : "");
+                        metadata.put(MetadataField.DOCUMENT_NAME, paragraph.getDocumentName() != null ? paragraph.getDocumentName() : "");
+                        metadata.put(MetadataField.IS_ACTIVE, String.valueOf(paragraph.getIsActive() != null ? paragraph.getIsActive() : false));
+                        return TextSegment.from(paragraph.getContent(), Metadata.from(metadata));
+                    })
+                    .toList());
+        }
+        return textSegments;
+    }
+}
